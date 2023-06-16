@@ -1,4 +1,4 @@
-# threejs-boilerplate-v2
+# threejs-beautifull-noisse-bg
 
 using vite js vanilla
 

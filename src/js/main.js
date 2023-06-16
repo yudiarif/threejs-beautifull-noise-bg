@@ -1,7 +1,14 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
-import vertex from "../shaders/vertex.glsl";
-import fragment from "../shaders/fragment.glsl";
+import vertexBg from "../shaders/vertexBg.glsl";
+import fragmentBg from "../shaders/fragmentBg.glsl";
+import vertexFresnel from "../shaders/vertexFresnel.glsl";
+import fragmentFresnel from "../shaders/fragmentFresnel.glsl";
+
+import { DotScreenShader } from "./customShaders";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import GUI from "lil-gui";
 import { gsap } from "gsap";
 
@@ -19,8 +26,10 @@ class WebGL {
 
     this.gui = new GUI();
     this.time = 0;
+    this.mouse = [];
     this.addCamera();
     this.addMesh();
+    this.postprocessing();
     this.addControl();
     this.addLight();
     this.render();
@@ -44,21 +53,43 @@ class WebGL {
   addCamera() {
     window.addEventListener("resize", this.onWindowResize.bind(this));
     this.camera = new THREE.PerspectiveCamera(70, this.viewport.aspectRatio, 0.1, 1000);
-    this.camera.position.z = 1.5;
+    this.camera.position.z = 1.2;
     this.renderer.setSize(this.viewport.width, this.viewport.height);
   }
 
   addMesh() {
-    this.geometry = new THREE.PlaneGeometry(1, 1, 1, 1);
+    this.geometry = new THREE.SphereGeometry(1.5, 32, 32);
     this.material = new THREE.ShaderMaterial({
       uniforms: { uTime: { value: 0 }, resolution: { value: new THREE.Vector4() } },
-      vertexShader: vertex,
-      fragmentShader: fragment,
+      vertexShader: vertexBg,
+      fragmentShader: fragmentBg,
       //wireframe: true,
-      // side: THREE.DoubleSide
+      side: THREE.DoubleSide,
     });
     this.mesh = new THREE.Mesh(this.geometry, this.material);
     this.scene.add(this.mesh);
+
+    this.cubeRenderTarget = new THREE.WebGLCubeRenderTarget(256, {
+      format: THREE.RGBAFormat,
+      generateMipmaps: true,
+      minFilter: THREE.LinearMipMapLinearFilter,
+      colorSpace: THREE.SRGBColorSpace,
+    });
+
+    this.cubeCamera = new THREE.CubeCamera(0.1, 10, this.cubeRenderTarget);
+    this.fresnelGeometry = new THREE.SphereGeometry(0.4, 32, 32);
+    this.fresnelMaterial = new THREE.ShaderMaterial({
+      uniforms: { tCube: { value: 0 } },
+      vertexShader: vertexFresnel,
+      fragmentShader: fragmentFresnel,
+      side: THREE.DoubleSide,
+      //wireframe: true,
+    });
+    this.miniSphere = new THREE.Mesh(this.fresnelGeometry, this.fresnelMaterial);
+    this.scene.add(this.miniSphere);
+    this.miniSphere.position.x = 0.38;
+    this.miniSphere.position.y = 0.22;
+    this.miniSphere.position.z = 0.7;
   }
 
   addLight() {
@@ -100,26 +131,40 @@ class WebGL {
   }
 
   onMouseMove() {
-    this.mouse = [];
     window.addEventListener("mousemove", (event) => {
       this.mouse.x = (event.clientX / this.viewport.width) * 2 - 1;
       this.mouse.y = (event.clientY / this.viewport.height) * 2 - 1;
-      this.mesh.position.x = gsap.utils.interpolate(this.mesh.position.x, this.mouse.x, 0.1);
-      this.mesh.position.y = gsap.utils.interpolate(this.mesh.position.y, -this.mouse.y, 0.1);
+      this.mesh.position.x = gsap.utils.interpolate(this.mesh.position.x, this.mouse.x / 3, 0.05);
+      this.mesh.position.y = gsap.utils.interpolate(this.mesh.position.y, -this.mouse.y / 3, 0.05);
     });
   }
+
   onWindowResize() {
     this.camera.aspect = this.viewport.aspectRatio;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(this.viewport.width, this.viewport.height);
   }
 
+  postprocessing() {
+    this.composer = new EffectComposer(this.renderer);
+    this.composer.addPass(new RenderPass(this.scene, this.camera));
+
+    const effect1 = new ShaderPass(DotScreenShader);
+    effect1.uniforms["scale"].value = 4;
+    this.composer.addPass(effect1);
+  }
   render() {
-    this.time += 0.05;
+    this.time += 0.01;
     this.material.uniforms.uTime.value = this.time;
-    //console.log(this.material.uniforms.uTime);
+    this.fresnelMaterial.uniforms.tCube.value = this.cubeRenderTarget.texture;
+    this.miniSphere.visible = false;
+    this.cubeCamera.update(this.renderer, this.scene);
+    this.miniSphere.visible = true;
     this.renderer.render(this.scene, this.camera);
+    this.composer.render();
+    //this.composer.render(this.scene, this.camera);
     window.requestAnimationFrame(this.render.bind(this));
+    //console.log(this.material.uniforms.uTime);
   }
 
   addSetting() {
